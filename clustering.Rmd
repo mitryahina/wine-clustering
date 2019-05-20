@@ -1,0 +1,163 @@
+---
+title: "Wine types clustering"
+output: html_notebook
+---
+
+We have a dataset with different properties of wine grown in a particular region in Italy but derived from three different cultivars. We will try to determine the number of possible clusters and by which parameters we can cluster them.
+
+```{r}
+# Data loading
+wine <- read.csv('wine.data')
+# For some reason names are not included to the dataset
+names <- c('Class','Alcohol', 'Malic_acid', 'Ash', 'Alcalinity', 'Magnesium', 'Total_phenols','Flavanoids', 'Nonflavanoid_phenols', 'Proanthocyanins', 'Color_intensity', 'Hue', 'OD280/OD315', 'Proline ')
+colnames(wine) <- names
+head(wine)
+
+```
+This is a good dataset with no missing values or invalid numbers, however we can see that data is not normalised, so we may need to scale it later.
+<h1>Vizualizations </h1>
+Now let's take a look at few different parameters to see if there exist any obvious clusters. Firstly, let's check if wines are clusterd by alcohol, magnesium contents, or color intensity.
+```{r}
+plot(wine$Alcohol, xlab='Alcohol', ylab='Percentage', main="Alcohol percentage distribution", col="#B31329")
+```
+```{r}
+plot(wine$Magnesium, xlab='Magnesium', ylab='Contents', main="Magnesium contents distribution", col="#B31329")
+```
+
+```{r}
+plot(wine$Color_intensity, xlab='Color intensity', ylab='Index', main="Color intensity distribution", col="#B31329")
+```
+There are no obvious clusters by such parameters. Now we would check if any class of wines has characteristic range by the same parameters.
+```{r}
+library(ggplot2)
+ggplot(wine, aes(x=Class, y = Alcohol, color=Class)) + geom_point(shape = 1) + ggtitle("Alcohol percentage by class")+theme(plot.title = element_text(hjust = 0.5)) 
+
+```
+As alcohol content is meant to be in a narrow range it is not reliable classification parameter.
+```{r}
+ggplot(wine, aes(x=Class, y = Color_intensity, color=Class)) + geom_point(shape = 1) + ggtitle("Color intensity by class")+theme(plot.title = element_text(hjust = 0.5))
+```
+Color intensity is a good candidate to be the parameter in a final parameter.
+```{r}
+ggplot(wine, aes(x=Class, y = Magnesium, color=Class)) + geom_point(shape = 1) + ggtitle("Magnesium contents by class")+theme(plot.title = element_text(hjust = 0.5))
+```
+By Magnesium contents second class is different from the others, but first and third almost do not differ.
+
+Assumption: some variables might be highly correlated, so we can omit them to reduce dimensionality.
+
+```{r}
+# Let's check correlation plot
+library(corrplot)
+M <- cor(wine)
+corrplot(M, type='upper')
+```
+Flavanoids, proanthocyanics and total number of phenols are highly correlated, and it turns out that they are just different types of phenol, so we omit  flavanoids and proanthocyanicsso relying on total phenols.
+```{r}
+wine$Proanthocyanins <- NULL
+wine$Flavanoids <- NULL
+library(corrplot)
+M <- cor(wine)
+corrplot(M, type='upper')
+```
+
+
+<h1>Let's split the data into train and test data!</h1>
+```{r}
+library(caTools)
+splitter <- sample.split(wine$Class)
+wine.train <- wine[splitter==TRUE, ]
+wine.test <- wine[splitter==FALSE, ]
+wine.test
+```
+<h1>Now we will classify wines using NaiveBayes algorithm</h1>
+Naive Bayes is a probabilistic classifier which strongly relies on the idea of independence between features. Given the prior distribution we can derive posterior conditional distribution
+\[P(c|x) = \frac{P(x|c) P(c)}{P(x)}\]
+where P(c|x) is the posterior probability of belonging to clas c given features $x_1$, $x_2$...  
+We will compare accuracy of the models with different number of features.
+<h3>One feature model</h3>
+Experimenting with different predictors it can be seen that color intensity guves one of the best accuracies on prediction.
+```{r}
+library(e1071)
+cat("Classifying by color intensity\n")
+nb_class <- naiveBayes(as.factor(Class) ~ Color_intensity, data = wine.train)
+cat("Accuracy on the train set: ", 100*mean(predict(nb_class, newdata = wine.train) == wine.train$Class), "%\n")
+cat("Accuracy on the test set: ", 100*mean(predict(nb_class, newdata = wine.test) == wine.test$Class), "%\n")
+
+```
+<h3>Two feature model</h3>
+```{r}
+cat("Classifying by color intensity, Ash\n")
+nb_class2 <- naiveBayes(as.factor(Class) ~ Color_intensity + Ash, data = wine.train)
+cat("Accuracy on the train set: ", 100*mean(predict(nb_class2, newdata = wine.train) == wine.train$Class), "%\n")
+cat("Accuracy on the test set: ", 100*mean(predict(nb_class2, newdata = wine.test) == wine.test$Class), "%\n")
+```
+<h3>Three feature model</h3>
+```{r}
+cat("Classifying by Color_intensity, Ash, Total_phenols\n")
+nb_class3 <- naiveBayes(as.factor(Class) ~ Color_intensity + Ash + Total_phenols, data = wine.train)
+cat("Accuracy on the train set: ", 100*mean(predict(nb_class3, newdata = wine.train) == wine.train$Class), "%\n")
+cat("Accuracy on the test set: ", 100*mean(predict(nb_class3, newdata = wine.test) == wine.test$Class), "%\n")
+```
+
+<h3>Four feature model</h3>
+```{r}
+cat("Classifying by Color_intensity, Alcohol, Ash, Total_phenols\n")
+nb_class4 <- naiveBayes(as.factor(Class) ~ Color_intensity + Alcohol + Ash + Total_phenols, data = wine.train)
+cat("Accuracy on the train set: ", 100*mean(predict(nb_class4, newdata = wine.train) == wine.train$Class), "%\n")
+cat("Accuracy on the test set: ", 100*mean(predict(nb_class4, newdata = wine.test) == wine.test$Class), "%")
+
+```
+We reached accuracy of 92% at train data and of almost 95% on the test data. Very decent results!
+
+
+<h1> Scaled data using k-means</h1>
+As it is known that there are three types of wine, we will firstly use parameter k = 3.
+The basic idea behind k-means clustering consists of defining clusters so that the total intra-cluster variation (known as total within-cluster variation) is minimized. 
+```{r}
+# After scaling the data
+set.seed(1)
+library(factoextra)
+wine.scaled <- data.frame(scale(wine.train[-1]))
+kms.scaled <- kmeans(wine.scaled, 3)
+cat("WCSS:", kms.scaled$totss, "\n")
+cat("Acccuracy: ", mean(wine.train$Class == as.factor(kms.scaled$cluster)))
+library(cluster)
+clusplot(wine.scaled, kms.scaled$cluster, main='Clusters plot')
+
+```
+We reached 99% accuracy, but drawbacks are obvious: k-means depends on the seed and we see some clusters are overlapping. Although, choice of k was obvious in this case but if we have less prior knowledge of the data it becomes harder. 
+
+```{r}
+wssplot <- function(data, nc=15){
+  wss <- (nrow(data)-1)*sum(apply(data,2,var))
+  for (i in 2:nc){
+    wss[i] <- sum(kmeans(data, centers=i)$withinss)}
+  plot(1:nc, wss, type="b", xlab="Number of Clusters",
+       ylab="Within groups sum of squares")}
+
+wssplot(wine[-1], nc=6) 
+```
+By observing total within sum of squares by k plot we can see that k=3 is justified not only from prior knowledge about three types of wines, but also by the dynamics of WCSS.
+<h1>t-distributed stochastic neighbour embedding </h1>
+The last method we are going to use is t-SNE, which is a nonlinear method to reduce dimensionality.
+The algorithms starts by calculating the probability of similarity of points in high-dimensional space and calculating the probability of similarity of points in the corresponding low-dimensional space. The similarity of points is calculated as the conditional probability that a point A would choose point B as its neighbor if neighbors were picked in proportion to their probability density under a Gaussian (normal distribution) centered at A.
+It then tries to minimize the difference between these conditional probabilities (or similarities) in higher-dimensional and lower-dimensional space for a perfect representation of data points in lower-dimensional space.
+To measure the minimization of the sum of difference of conditional probability t-SNE minimizes the sum of Kullback-Leibler divergence of overall data points using a gradient descent method.
+Contrary to PCA, which also performs feature extraction, t-SNE is nonlinear, and as we have real worls data, non-linearity is very probable.
+```{r}
+library("Rtsne")
+tsne.res <- Rtsne(wine[-1,], dims = 2, perplexity=30, verbose=TRUE, max_iter = 1000, eta=200)
+```
+
+```{r}
+colors = rainbow(length(unique(wine$Class)))
+names(colors) = unique(wine$Class)
+par(mgp=c(2.5,1,0))
+plot(tsne.res$Y, t='n', main="Clustering with t-SNE", xlab="tSNE dimension 1", ylab="tSNE dimension 2", "cex.main"=2, "cex.lab"=1.5)
+text(tsne.res$Y, labels=wine$Class, col=colors[wine$Class])
+
+```
+We can observe, that t-SNE did a good job extracting features that differ first class from second and third, but second and third classes are overlapping very much, which means such clustering is of little use in practice.
+
+<h1>Summary</h1>
+We reviewed various methods of data classification, namely naiveBayes, k-means and t-SNE. It turns out that naiveBayes is the best by the combination of accuracy, interpretability and testing on the new data. Sometimes simple algorithms are just good enough)
